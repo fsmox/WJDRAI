@@ -2,6 +2,7 @@
 from pynput.mouse import Listener
 from PIL import Image
 import time
+import os
 
 # 用于保存截图的编号
 screenshot_counter = 1
@@ -58,11 +59,16 @@ def on_click(x, y, button, pressed):
             # 获取指定区域的截图
             screenshot = pyautogui.screenshot(region=(x1, y1, x2 - x1, y2 - y1))
 
-            # 保存截图，文件名格式：日期_时间_编号_左上角位置_右下角位置_点击位置_抬起位置.png
-            screenshot.save(f"{now}_{screenshot_counter}_{x1}_{y1}_{x2}_{y2}_{Pressed_x}_{Pressed_y}_{x}_{y}.png")
-            print(f"Screenshot saved as screenshot_{screenshot_counter}_{x}_{y}.png")
+            # 创建Capture文件夹
+            capture_folder = os.path.join(os.path.dirname(__file__), 'Data')
+            os.makedirs(capture_folder, exist_ok=True)
 
-            # 增加截图编号
+            # 保存截图，文件名格式：日期_时间_编号_左上角位置_右下角位置_点击位置_抬起位置.png
+            screenshot_path = os.path.join(capture_folder, f"{now}_{screenshot_counter}_{x1}_{y1}_{x2}_{y2}_{Pressed_x}_{Pressed_y}_{x}_{y}.png")
+            screenshot.save(screenshot_path)
+            print(f"Screenshot saved as {screenshot_path}")
+
+            # 增加截图编号            
             screenshot_counter += 1
         else:
             print(f"Click at ({x}, {y}) is outside the screenshot area.")

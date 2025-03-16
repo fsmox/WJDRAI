@@ -99,7 +99,7 @@ class CaptureDataset(Dataset):
 def main():
     # 获取当前脚本所在目录，并拼接 Capture 文件夹路径
     current_dir = os.path.dirname(os.path.abspath(__file__))
-    capture_folder = os.path.join(current_dir, "Capture")
+    capture_folder = os.path.join(current_dir, "Data")
     
     # 定义图像预处理（调整尺寸和归一化，符合 ResNet50 要求）
     transform = transforms.Compose([
