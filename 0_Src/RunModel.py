@@ -25,6 +25,13 @@ elif use_mps:
 else:
     device = torch.device("cpu")
     print("Using CPU")
+
+# Load the pre-trained ClickPredictionModel
+model_path = "Src/Model/click_prediction_model.pth"
+model = ClickPredictionModel()
+model.load_state_dict(torch.load(model_path, map_location=device))
+model.eval()
+
 input_tensor = torch.tensor([x1, y1, x2, y2], dtype=torch.float32).unsqueeze(0)
 ByInput = False
 # 通过键盘输入坐标
