@@ -8,6 +8,7 @@ from PIL import Image
 import matplotlib.pyplot as plt
 import os
 import re
+import torch.nn.functional as torchF
 
 class ResizePad:
     def __init__(self, target_size, fill=0):
@@ -53,7 +54,7 @@ class CaptureDataset(Dataset):
         self.image_files = [f for f in os.listdir(root_dir) if f.endswith('.png')]
         # 正则表达式匹配11个字段，日期和时间字段允许包含'-'，其他字段均为数字
         self.filename_pattern = re.compile(
-            r"(\d+-\d+-\d+_\d+-\d+-\d+)_(\d+)_x1_(\d+)_y1_(\d+)_x2_(\d+)_y2_(\d+)_Px_(\d+)_Py_(\d+)_Rx_(\d+)_Ry_(\d+)\.png"
+            r"([^_]+)_([^_]+)_([^_]+)_([^_]+)_([^_]+)_([^_]+)_([^_]+)_([^_]+)_([^_]+)_([^_]+)_([^_]+)\.png"
         )
 
     def __len__(self):
@@ -78,16 +79,10 @@ class CaptureDataset(Dataset):
             y1 = int(groups[3])
             x2 = int(groups[4])
             y2 = int(groups[5])
-            Pressed_x = int(groups[6]) - x1
-            Pressed_y = int(groups[7]) - y1
-            Px = Pressed_x / (x2 - x1)
-            Py = Pressed_y / (y2 - y1)
-            # groups[8] 和 groups[9] 可能是其他坐标，暂时忽略
+            Pressed_x = int(groups[6])
+            Pressed_y = int(groups[7])
             x = int(groups[8])
             y = int(groups[9])
-            # print(f"文件名: {img_name}")
-            # print(f"x1: {x1}, y1: {y1}, x2: {x2}, y2: {y2}, Pressed_x: {Pressed_x}, Pressed_y: {Pressed_y}")
-            # print(f"{img_name}, Px: {Px}, Py: {Py}")
         except Exception as e:
             raise ValueError(f"解析数字失败，文件名: {img_name}") from e
 
@@ -99,13 +94,17 @@ class CaptureDataset(Dataset):
         # 输入参数为 (x1, y1, x2, y2)，目标参数为 (Pressed_x, Pressed_y, x, y)
         input_tensor = torch.tensor([x1, y1, x2, y2], dtype=torch.float32)
         # target_tensor = torch.tensor([Pressed_x, Pressed_y, x, y], dtype=torch.float32)
-        target_tensor = torch.tensor([Px, Py], dtype=torch.float32)
+        target_tensor = torch.tensor([Pressed_x, Pressed_y], dtype=torch.float32)
 
         return image, input_tensor, target_tensor
 
 class ClickPredictionModel(nn.Module):
-    def __init__(self):
+    def __init__(self,output_dim=2, num_vectors=4):
         super(ClickPredictionModel, self).__init__()
+
+        self.output_dim = output_dim
+        self.num_vectors = num_vectors
+
         # 使用预训练的 ResNet50 提取特征
         self.backbone = models.resnet50(pretrained=True)
         self.backbone.fc = nn.Identity()  # 移除分类层，保留 2048 维特征
@@ -114,11 +113,27 @@ class ClickPredictionModel(nn.Module):
         self.fc = nn.Sequential(
             nn.Linear(2052, 512),
             nn.ReLU(),
-            nn.Linear(512, 2)  # 输出 (x, y)
+            nn.Linear(512, output_dim * num_vectors)  # 输出 (x, y)
         )
+        self.prob_fc = nn.Linear(2052, num_vectors)
 
     def forward(self, img, input_xy):
         features = self.backbone(img)  # 提取特征
         features = torch.cat([features, input_xy], dim=1)  # 将输入参数拼接到特征后
-        xy = self.fc(features)  # 预测点击坐标
-        return xy
+        xy = self.fc(features)  # 预测点击坐标  
+        vectors = xy.view(-1, self.num_vectors, self.output_dim)
+
+        # 计算 4 个概率 logits 并转换为概率
+        logits = self.prob_fc(features)  # [batch_size, 4]
+        probabilities = torchF.softmax(logits)  # 变成概率分布
+
+        # 使用multinomial根据概率采样
+        sample_index = torch.multinomial(probabilities, num_samples=1)  # [batch_size, 1]
+
+        # 调整 sample_index 的形状以便在第二个维度索引
+        sample_index = sample_index.unsqueeze(-1).expand(-1, -1, vectors.size(-1))  # [batch_size, 1, output_dim]
+
+        # 从第二个维度挑选
+        sampled_xy = torch.gather(vectors, dim=1, index=sample_index).squeeze(1)  # [batch_size, output_dim]
+
+        return sampled_xy
